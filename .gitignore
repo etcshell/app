@@ -2,7 +2,7 @@
 /yii
 /yii_test
 /yii_test.bat
-
+/vagrant
 # phpstorm project files
 .idea
 
@@ -33,3 +33,4 @@ phpunit.phar
 
 # vagrant runtime
 /.vagrant
+/backend/tests

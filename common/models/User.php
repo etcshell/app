@@ -6,6 +6,12 @@ use yii\base\NotSupportedException;
 use yii\behaviors\TimestampBehavior;
 use yii\db\ActiveRecord;
 use yii\web\IdentityInterface;
+use yii\filters\auth\HttpBearerAuth;
+use yii\filters\RateLimitInterface;
+use api\models\ApiAuthToken;
+use Lcobucci\JWT\Signer\Hmac\Sha256;
+use common\models\Model;
+
 
 /**
  * User model
@@ -19,13 +25,12 @@ use yii\web\IdentityInterface;
  * @property integer $status
  * @property integer $created_at
  * @property integer $updated_at
+ * @property integer $allowance
+ * @property integer $allowance_updated_at
  * @property string $password write-only password
  */
-class User extends ActiveRecord implements IdentityInterface
+class User extends Model implements IdentityInterface,RateLimitInterface
 {
-    const STATUS_DELETED = 0;
-    const STATUS_ACTIVE = 10;
-
 
     /**
      * @inheritdoc
@@ -38,22 +43,46 @@ class User extends ActiveRecord implements IdentityInterface
     /**
      * @inheritdoc
      */
-    public function behaviors()
-    {
-        return [
-            TimestampBehavior::className(),
-        ];
-    }
-
-    /**
-     * @inheritdoc
-     */
     public function rules()
     {
         return [
+            ['email', 'trim'],
+            ['username', 'trim'],
+            ['password_hash', 'trim'],
+            ['username', 'required'],
+            ['email', 'required'],
+            ['auth_key', 'required'],
+            ['password_hash', 'required'],
+            ['email', 'unique'],
+            ['username', 'unique'],
+            ['username', 'string', 'min' => 2, 'max' => 255],
+            ['email', 'email'],
+            ['email', 'string', 'max' => 255],
+            ['password_hash', 'string', 'min' => 6],
             ['status', 'default', 'value' => self::STATUS_ACTIVE],
             ['status', 'in', 'range' => [self::STATUS_ACTIVE, self::STATUS_DELETED]],
         ];
+    }
+
+    public function getRateLimit($request, $action)
+    {
+        return [5, 10];
+    }
+
+    public function loadAllowance($request, $action)
+    {
+        return [$this->allowance, $this->allowance_updated_at];
+    }
+
+    public function saveAllowance($request, $action, $allowance, $timestamp){
+      $this->allowance = $allowance;
+      $this->allowance_updated_at = $timestamp;
+      $this->save();
+    }
+
+    public static function getApiAuthToken($token)
+    {
+       return $this->hasOne(ApiAuthToken::className(), ['user_id' => 'id'])->where('token:token', [':token' => $token])->orderBy('id');
     }
 
     /**
@@ -69,7 +98,55 @@ class User extends ActiveRecord implements IdentityInterface
      */
     public static function findIdentityByAccessToken($token, $type = null)
     {
-        throw new NotSupportedException('"findIdentityByAccessToken" is not implemented.');
+        if($type == HttpBearerAuth::className()){
+              $signer = new Sha256();
+              $token = Yii::$app->jwt->getParser()->parse((string) $token);
+              $user_id = $token->getClaim('uid');
+              $data = Yii::$app->jwt->getValidationData();
+              $data->setIssuer(Yii::$app->params['api_issuer']);
+              $data->setAudience(Yii::$app->params['api_audience']);
+              $data->setId(Yii::$app->params['api_auth_id']);
+              $data->setCurrentTime(time());
+              if($token->validate($data)&&$token->verify($signer, Yii::$app->params['api_signer'])){
+                  return static::findOne(['id'=>$user_id,'status'=>self::STATUS_ACTIVE]);
+              }
+        }else{
+            return static::findOne(['status'=>self::STATUS_ACTIVE]);
+        }
+    }
+
+    public static function createAuthkey($uid)
+    {
+          $signer = new Sha256();
+          $token = Yii::$app->jwt
+                      ->getBuilder()
+                      ->setIssuer(Yii::$app->params['api_issuer']) // Configures the issuer (iss claim)
+                      ->setAudience(Yii::$app->params['api_audience']) // Configures the audience (aud claim)
+                      ->setId(Yii::$app->params['api_auth_id'], true) // Configures the id (jti claim), replicating as a header item
+                      ->set('uid', $uid) // Configures a new claim, called "uid"
+                      ->sign($signer, Yii::$app->params['api_signer'])
+                      ->getToken();
+          return (string)$token;
+
+    }
+
+    public function afterSave($insert,$changedAttributes)
+    {
+        if (parent::beforeSave($insert))
+        {
+            if ($insert)
+            {
+                $api_auth_token = new ApiAuthToken;
+                $api_auth_token->user_id = $this->id;
+                $api_auth_token->token = $this->createAuthkey($this->id);
+                $api_auth_token->status = self::STATUS_ACTIVE;
+                $api_auth_token->ip = ip2long(Yii::$app->request->getUserIP());
+                if($api_auth_token->save())
+                  return true;
+                else
+                  return false;
+            }
+        }
     }
 
     /**

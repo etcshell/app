@@ -1,5 +1,5 @@
 <?php
-namespace backend\controllers;
+namespace api\controllers;
 
 use Yii;
 use yii\web\Controller;
@@ -94,5 +94,10 @@ class SiteController extends Controller
         Yii::$app->user->logout();
 
         return $this->goHome();
+    }
+
+    public function actionError()
+    {
+      echo 33;
     }
 }
