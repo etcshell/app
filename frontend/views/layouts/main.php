@@ -80,3 +80,20 @@ AppAsset::register($this);
 </body>
 </html>
 <?php $this->endPage() ?>
+<script>
+$(document).ready(function(){
+$("#b01").click(function(){
+  $.ajax({
+          url: 'http://192.168.99.231:8004',//地址
+          type: 'GET',//提交方式 可以选择post/get 推荐post
+          dataType: 'json',//返回数据类型
+          success:function(data){
+              alert(data.username)
+          },
+          error:function(data){
+              alert("df")
+          },
+      });
+});
+});
+</script>

@@ -2,6 +2,7 @@
 namespace api\components;
 
 use Yii;
+use yii\filters\Cors;
 use yii\rest\ActiveController;
 use yii\helpers\ArrayHelper;
 use yii\filters\auth\CompositeAuth;
@@ -32,6 +33,13 @@ class AuthController extends ActiveController
         ],
         'rateLimiter'=>[
           'enableRateLimitHeaders' => true
+        ],
+        [
+           'class' => Cors::className(),
+               'cors' => [
+                  'Origin' => ['*'],
+                  'Access-Control-Request-Method' => ['GET','POST','PUT','DELETE', 'HEAD', 'OPTIONS'],//允许动作的数组
+                ]
         ]
       ]);
   }
